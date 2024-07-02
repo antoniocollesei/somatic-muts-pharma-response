@@ -1,32 +1,35 @@
 ---
 title: "DNA Alteration & Pharmacological Response"
-output: html_notebook
-number_sections: TRUE
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+number_sections: yes
 ---
 
 # Data Upload and Inspection
 
-```{r}
+```{r, warning=FALSE}
 load("project_dataset.RData")
 
-head(CCLE_MUT_CNA_AMP_DEL_binary_Revealer)
+head(CCLE_MUT_CNA_AMP_DEL_binary_Revealer[,1:4])
 ```
 <br>
 The **CCLE_MUT_CNA_AMP_DEL_binary_Revealer** file contains mutations for each cell line, from the CCLE project. Each line corresponds to a mutation (of various types) in a gene; for example HDAC6_MUT indicates a single base mutation (MUT) in the HDAC6 gene. Each column from the third corresponds to a cell line. An entry to 1 indicates that the mutation in that gene is present in the cell line, while 0 indicates that the mutation is not present in the cell line.
 More info about the project can be found here: https://portals.broadinstitute.org/ccle/about.
 
-```{r}
+```{r, warning=FALSE}
 target <- target_data_NAcount_August21
 row.names(target) <- as.character(target[,1])
 target <- target[,-1]
-head(target)
+head(target[,1:4])
 ```
 <br>
 The **target_data_NAcount_August21** file contains the response of cell lines to various pharmacological compounds, from the GDSC project. Each row corresponds to a compound; each column corresponds to a cell line. The value of an entry is a measure of how much the cell line responds to the drug compound.
 More info about the project can be found here: https://www.cancerrxgene.org/
 
 
-```{r}
+```{r, warning=FALSE}
 library(readr)
 pathways <- read_delim("PathwayCommons12.panther.hgnc.txt", 
             "\t", escape_double = FALSE, 
@@ -41,7 +44,7 @@ The **PathwayCommons12.panther.hgnc** file contains all the gene-gene interactio
 It has been downloaded from https://www.pathwaycommons.org/.
 
 ## Needed Packages
-```{r}
+```{r, warning=FALSE}
 suppressPackageStartupMessages({
 conflictRules("DelayedArray", exclude = "seed")
 library(NMF)
@@ -66,18 +69,18 @@ The Non-Negative Matrix Factorization (NMF) is a powerful tool to perform featur
 
 The CCLE dataset appears to be extremely sparse, as it is possible to appreciate from the following heatmap. Even though the size has been reduced for computational reasons, the same situation can be extended to the whole set.
 ```{r}
-heatmap(as.matrix(CCLE_MUT_CNA_AMP_DEL_binary_Revealer[1:1000, 1:1000]))
+heatmap(as.matrix(CCLE_MUT_CNA_AMP_DEL_binary_Revealer[1:200, 1:200]))
 ```
 
 It may be useful to rename the matrices to make them more "user-friendly" to handle
-```{r}
+```{r, warning=FALSE}
 mutations <- CCLE_MUT_CNA_AMP_DEL_binary_Revealer
 drugs <- target_data_NAcount_August21
 ```
 
 It is important to work with comparable datasets, containing the same cell lines: this will enable robust results in terms of model construction. In the following lines of code, only common cell lines will be kept, filtering out the uncommon.
 
-```{r}
+```{r, warning=FALSE}
 tissues_CCLE <- colnames(mutations)
 tissues_CCLE <- unique(gsub("[^_]*_(.*)", "\\1", tissues_CCLE))
 
@@ -97,7 +100,7 @@ drugs <- drugs[, grep(paste(tissues, sep = "", collapse = "|"), colnames(drugs))
 It is helpful to perform smoothing independently for mutations, insertions and deletions: the Pathway Commons interaction database considers gene-gene relationships and the smoothing algorithm (package *netSmooth*) recognizes the gene names in the dataset with respect to the adjacency matrix built on the interaction database itself.
 The following process is meant to separate the datasets into three smaller datasets, apply smoothing and then rebuild the original dataset, that now will include the non-sparse information.
 
-```{r}
+```{r, warning=FALSE}
 # Creation of the three datasets based on the type of mutation
 mutations_MUT <- mutations[grep("_MUT", row.names(mutations)), ]
 mutations_AMP <- mutations[grep("_AMP", row.names(mutations)), ]
@@ -132,7 +135,7 @@ mutations.smoothed <- mutations.smoothed[apply(mutations.smoothed, 1, function(x
 The necessity of selecting the most relevant mutations has already been acknowledged. As a plus, it can improve the specificity of the analysis if each cancer type was considered independently. It should be worth focusing on tumors highly represented in terms of cell lines: also a "poorly-represented" cancer type will be included to check whether the lower amount of data affects the performance of the model.
 First of all, let's check the number of cell lines per tumor.
 
-```{r}
+```{r, warning=FALSE}
 tissues_CCLE <- colnames(mutations.smoothed)
 tissues_CCLE <- unique(gsub("[^_]*_(.*)", "\\1", tissues_CCLE))
 
@@ -144,14 +147,19 @@ for (i in 1:length(tissues_CCLE)) {
 }
 tissues_occurrencies <- as.data.frame(t(tissues_occurrencies))
 colnames(tissues_occurrencies) <- tissues_CCLE
-(tissues_occurrencies <- sort(tissues_occurrencies, decreasing = TRUE))
+
+# Sort tissues_occurrencies data frame column-wise
+sorted_tissues_occurrencies <- tissues_occurrencies[, order(-apply(tissues_occurrencies, 2, sum))]
+
+# Print the sorted data frame
+print(sorted_tissues_occurrencies[1:5])
 ```
 
 *Lung* and *Haematopoietic and Lymphoid Tissue* cancers will be included in the analysis; also *Breast* cancer will be considered, due to its clinical relevance, despite offering just one third of the data with respect to the other two cancer types.
 
 In the following lines of code, the most relevant mutations for these three tumors will be extracted, once again through NMF and exploiting its built-in function featureScore(). The value **s** stands for the number of extracted mutations. **k** is the number of clusters.
 
-```{r}
+```{r, warning=FALSE}
 s <- 250
 k<- 4
 
@@ -235,8 +243,8 @@ Let's inspect the data.
 Besides the target data, already shown in the first chapter, now three tumor-targeted matrices have been created with a reduced and relevant number of mutations.
 For example, this is the matrix for Breast cancer, with 10 specific mutations, taken randomly.
 
-```{r}
-mutations.filtered_BREAST
+```{r, warning=FALSE}
+mutations.filtered_BREAST[1:10,1:5]
 sample(names(mutations_topscore_BREAST), 10)
 ```
 
@@ -247,7 +255,7 @@ Now that the mutation matrix has been reduced in size by considering both the mo
 First thing is assemble the matrix for the model to be built on.
 One fundamental step is to consider only common cell lines, present both in the mutation and the target data.
 
-```{r}
+```{r, warning=FALSE}
 mutL <- mutations.filtered_LUNG
 
 # Filtering out LUNG from data
@@ -265,7 +273,7 @@ drug_names <- rownames(target)
 The following step consists of creating a list of matrices, one for each single drug, having the *response variable y* to be predicted as the drug effectiveness. The mutation landscape for each cell line plays the role of *predictors*.
 For example...
 
-```{r}
+```{r, warning=FALSE}
 # Creating the matrices with the response y for the single drug
 tm.list <- list()
 
@@ -280,14 +288,14 @@ for (i in 1:length(drug_names)) {
 
 names(tm.list) <- row.names(targetL)
 
-tm.list[[1]]
-names(tm.list)[1]
+tm.list[[1]][1:10,1:5]
+#names(tm.list)[1]
 
 ```
 
 The data are prepared as usual subdividing each matrix into training and test set.
 
-```{r}
+```{r, warning=FALSE}
 
 # Set the formula
 f <- as.formula("drug ~ .")
@@ -309,7 +317,7 @@ Two different model types are built and compared in terms of performance: a Gene
 
 Let's have a look at the GLM first. A simple cross-validation control is applied in order to obtain a model whose performance is realistic.
 
-```{r}
+```{r, warning=FALSE}
 MSE.glm_LUNG <- c()
 glm.models_LUNG <-list()
 response.glm_LUNG <- list()
@@ -336,7 +344,7 @@ The NN instead underwent a refinement processe. The number of hidden layers has 
 First a simple model was chosen with a 5-5-5 layout, giving decent results; the high number of predictors may have suggested the use of a more complex model, such a 15-15-15 layout: the prediction error increased consistently.
 The model proposed below uses a 15-10-5 cascade-like layout, averaging the best performance error over the whole bunch of drugs analyzed.
 
-```{r}
+```{r, warning=FALSE}
 MSE.nn_LUNG <- c()
 nn.models_LUNG <- list()
 response.nn_LUNG <- list()
@@ -367,9 +375,9 @@ names(response.nn_LUNG) <- drug_names
 
 Let's compare the performance of these two different model approaches: the Neural Network seems to fit better the data, averaging a lower mean squared error.
 
-```{r}
-mean(MSE.glm_LUNG)
-mean(MSE.nn_LUNG)
+```{r, warning=FALSE}
+#mean(MSE.glm_LUNG)
+#mean(MSE.nn_LUNG)
 
 par(mfrow=c(1,2))
 plot(MSE.glm_LUNG, type="l", col="blue", main="GLM", ylim = c(0,0.5), xlab="drugs", ylab="error")
@@ -380,7 +388,7 @@ abline(h=mean(MSE.nn_LUNG), col="red")
 
 And in a boxplot flavor...
 
-```{r}
+```{r, warning=FALSE}
 par(mfrow=c(1,2))
 boxplot(MSE.glm_LUNG)
 boxplot(MSE.nn_LUNG)
@@ -390,7 +398,7 @@ boxplot(MSE.nn_LUNG)
 
 This and the next section will be just presented in terms of code: only the results will be discussed, as the algorithm being used is the same.
 
-```{r}
+```{r, warning=FALSE}
 mutH <- mutations.filtered_HLT
 
 # Filtering out HLT from data
@@ -417,12 +425,12 @@ for (i in 1:length(drug_names)) {
 
 names(tm.list) <- row.names(targetH)
 
-tm.list[[1]]
-names(tm.list)[1]
+tm.list[[1]][1:10,1:5]
+#names(tm.list)[1]
 
 ```
 
-```{r}
+```{r, warning=FALSE}
 
 f <- as.formula("drug ~ .")
 
@@ -490,7 +498,7 @@ names(response.nn_HLT) <- drug_names
 
 ## Breast Cancer Analysis
 
-```{r}
+```{r, warning=FALSE}
 mutB <- mutations.filtered_BREAST
 
 # Filtering out BREAST from data
@@ -517,12 +525,12 @@ for (i in 1:length(drug_names)) {
 
 names(tm.list) <- row.names(targetB)
 
-tm.list[[1]]
-names(tm.list)[1]
+tm.list[[1]][1:10,1:5]
+#names(tm.list)[1]
 
 ```
 
-```{r}
+```{r, warning=FALSE}
 
 f <- as.formula("drug ~ .")
 
@@ -592,12 +600,12 @@ names(response.nn_BREAST) <- drug_names
 
 It is worth comparing the performance of the models applied to the three selected cancer types.
 
-```{r}
+```{r, warning=FALSE}
 mean_errors <- sapply(list(MSE.glm_LUNG, MSE.nn_LUNG, MSE.glm_HLT, MSE.nn_HLT, MSE.glm_BREAST, MSE.nn_BREAST), mean)
 
 model <- rep(c("GLM", "NN"), 3)
 tumor <- c(rep("LUNG", 2), rep("HLT", 2), rep("BREAST", 2))
-(performance <- data.frame(model, tumor, mean_errors))
+performance <- data.frame(model, tumor, mean_errors)
 
 ggplot(performance, aes(fill=model, y=mean_errors, x=tumor)) + 
        geom_bar(position="dodge", stat="identity")
